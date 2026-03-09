@@ -165,6 +165,17 @@ final class DownloadManager {
         }
     }
 
+    func shareFile(_ item: DownloadItem) {
+        guard let path = item.filePath else { return }
+        let url = URL(fileURLWithPath: path)
+        let picker = NSSharingServicePicker(items: [url])
+        if let window = NSApp.keyWindow, let contentView = window.contentView {
+            let frame = contentView.bounds
+            let point = NSRect(x: frame.midX, y: frame.midY, width: 1, height: 1)
+            picker.show(relativeTo: point, of: contentView, preferredEdge: .minY)
+        }
+    }
+
     func openDownloadFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: downloadPath))
     }

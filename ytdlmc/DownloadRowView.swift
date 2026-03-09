@@ -7,6 +7,7 @@ struct DownloadRowView: View {
     let onRemove: () -> Void
     let onOpen: () -> Void
     let onReveal: () -> Void
+    let onShare: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -190,6 +191,13 @@ struct DownloadRowView: View {
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.blue)
+
+                Button(action: onShare) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.blue)
             }
 
             Button(action: onRemove) {
@@ -263,6 +271,7 @@ struct DownloadRowView: View {
             Divider()
             Button("Open File", action: onOpen)
             Button("Show in Finder", action: onReveal)
+            Button("Share…", action: onShare)
         }
 
         Divider()

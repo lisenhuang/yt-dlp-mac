@@ -64,8 +64,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v$(date +%Y.%m.%d)-$(echo ${{ github.sha }} | cut -c1-7)"
-          TITLE="Build $(date +%Y-%m-%d) (${GITHUB_SHA::7})"
+          TAG="v$(date -u +%Y.%m.%d.%H%M)"
+          TITLE="Build $(date -u +%Y-%m-%d %H:%M) UTC (${GITHUB_SHA::7})"
 
           BODY=$(cat <<'EOF'
           Automated build from `main`.
