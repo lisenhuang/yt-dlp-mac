@@ -37,14 +37,18 @@ No terminal needed — just paste a URL and click Download.
  ┌──────────────────────────────────────────────────────┐
  │  1. Download yt-dlp-mac.dmg                          │
  │  2. Open DMG → drag yt-dlp-mac.app to Applications   │
- │  3. Right-click → Open (first launch only)           │
+ │  3. Allow the app to run (see below)                 │
  │  4. Paste a YouTube URL → click Download!            │
  └──────────────────────────────────────────────────────┘
 ```
 
 1. **Download** [`yt-dlp-mac.dmg`](https://github.com/lisenhuang/yt-dlp-mac/releases/latest/download/yt-dlp-mac.dmg) or grab it from [Releases](https://github.com/lisenhuang/yt-dlp-mac/releases)
 2. **Open** the DMG and drag `yt-dlp-mac.app` to your Applications folder
-3. **First launch** — right-click the app → Open (required once for unsigned builds)
+3. **First launch** — macOS will block the app because it's unsigned. To allow it:
+   - Open **System Settings → Privacy & Security**
+   - Scroll down to the Security section — you'll see a message about `yt-dlp-mac` being blocked
+   - Click **"Open Anyway"**
+   - You only need to do this once
 4. The app automatically downloads yt-dlp on first launch — no manual installation needed
 
 ## 🎯 Usage
@@ -78,15 +82,15 @@ Open Settings via the gear icon or `Cmd+,`.
 | 🎚️ **Default Quality** | Quality preset for new downloads |
 | ⚡ **Max Concurrent Downloads** | How many videos download at once (1–10) |
 | 🔧 **yt-dlp** | Auto-installed; shows version with one-click Update button |
-| 🍪 **Cookies File** | Optional `cookies.txt` for age-restricted or private videos |
+| 🍪 **Cookies** | Read cookies directly from your browser for age-restricted or private videos |
 
 ### 🍪 Cookies
 
 Some videos require authentication. To use cookies:
 
-1. Install a browser extension like [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
-2. Export cookies from YouTube as a `.txt` file
-3. Set the path in Settings → Cookies File
+1. Open Settings → Cookies
+2. Select **From Browser** and pick your browser (Chrome, Safari, Firefox, etc.)
+3. yt-dlp reads cookies directly — no extensions or manual export needed
 
 ## 🛠️ Building from Source
 

@@ -22,12 +22,58 @@ struct ParsedLine: Sendable {
     }
 }
 
+enum CookieSource: String, CaseIterable, Identifiable {
+    case none = "None"
+    case browser = "From Browser"
+    case file = "From File"
+
+    var id: String { rawValue }
+}
+
+enum BrowserChoice: String, CaseIterable, Identifiable {
+    case chrome = "chrome"
+    case firefox = "firefox"
+    case safari = "safari"
+    case edge = "edge"
+    case brave = "brave"
+    case opera = "opera"
+    case chromium = "chromium"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .chrome: "Chrome"
+        case .firefox: "Firefox"
+        case .safari: "Safari"
+        case .edge: "Edge"
+        case .brave: "Brave"
+        case .opera: "Opera"
+        case .chromium: "Chromium"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .chrome: "globe"
+        case .firefox: "flame"
+        case .safari: "safari"
+        case .edge: "globe"
+        case .brave: "shield"
+        case .opera: "globe"
+        case .chromium: "globe"
+        }
+    }
+}
+
 @Observable
 final class DownloadManager {
     var downloads: [DownloadItem] = []
     var downloadPath: String
     var ytdlpPath: String
     var cookiesPath: String
+    var cookieSource: CookieSource
+    var cookiesBrowser: BrowserChoice
     var maxConcurrentDownloads: Int
     var selectedQuality: VideoQuality
     var ytdlpFound: Bool = false
@@ -58,8 +104,15 @@ final class DownloadManager {
         self.downloadPath = defaults.string(forKey: "downloadPath") ?? "\(home)/Downloads"
         self.ytdlpPath = defaults.string(forKey: "ytdlpPath") ?? ""
         self.cookiesPath = defaults.string(forKey: "cookiesPath") ?? ""
+        self.cookieSource = CookieSource(rawValue: defaults.string(forKey: "cookieSource") ?? "") ?? .none
+        self.cookiesBrowser = BrowserChoice(rawValue: defaults.string(forKey: "cookiesBrowser") ?? "") ?? .chrome
         self.maxConcurrentDownloads = max(1, defaults.integer(forKey: "maxConcurrent") == 0 ? 3 : defaults.integer(forKey: "maxConcurrent"))
         self.selectedQuality = VideoQuality(rawValue: defaults.string(forKey: "quality") ?? "") ?? .best
+
+        // Migrate: if user had a cookiesPath set but no cookieSource, default to .file
+        if !cookiesPath.isEmpty && cookieSource == .none {
+            cookieSource = .file
+        }
 
         if ytdlpPath.isEmpty {
             ytdlpPath = Self.resolveYTDLPPath()
@@ -75,10 +128,27 @@ final class DownloadManager {
         defaults.set(downloadPath, forKey: "downloadPath")
         defaults.set(ytdlpPath, forKey: "ytdlpPath")
         defaults.set(cookiesPath, forKey: "cookiesPath")
+        defaults.set(cookieSource.rawValue, forKey: "cookieSource")
+        defaults.set(cookiesBrowser.rawValue, forKey: "cookiesBrowser")
         defaults.set(maxConcurrentDownloads, forKey: "maxConcurrent")
         defaults.set(selectedQuality.rawValue, forKey: "quality")
         ytdlpFound = FileManager.default.isExecutableFile(atPath: ytdlpPath)
         ytdlpSetupStatus = ytdlpFound ? .ready : .unknown
+    }
+
+    /// Builds cookie arguments based on user's chosen cookie source.
+    nonisolated static func cookieArgs(source: CookieSource, browser: BrowserChoice, filePath: String) -> [String] {
+        switch source {
+        case .none:
+            return []
+        case .browser:
+            return ["--cookies-from-browser", browser.rawValue]
+        case .file:
+            if !filePath.isEmpty && FileManager.default.fileExists(atPath: filePath) {
+                return ["--cookies", filePath]
+            }
+            return []
+        }
     }
 
     // MARK: - yt-dlp Discovery & Auto-Install
@@ -305,13 +375,18 @@ final class DownloadManager {
         let url = item.url
         let ytdlp = self.ytdlpPath
         let dest = self.downloadPath
-        let cookies = self.cookiesPath
+        let cookieSrc = self.cookieSource
+        let cookieBrowser = self.cookiesBrowser
+        let cookieFile = self.cookiesPath
         let formatStr = item.quality.formatString
         let outputFmt = item.quality.outputFormat
         let isAudioOnly = item.quality == .audioOnly
 
         Task.detached {
-            let title = Self.fetchTitleSync(url: url, ytdlpPath: ytdlp)
+            let title = Self.fetchTitleSync(
+                url: url, ytdlpPath: ytdlp,
+                cookieSource: cookieSrc, cookieBrowser: cookieBrowser, cookieFile: cookieFile
+            )
             await MainActor.run {
                 item.title = title
                 item.status = .downloading
@@ -325,10 +400,7 @@ final class DownloadManager {
             process.executableURL = URL(fileURLWithPath: ytdlp)
             process.environment = Self.shellEnvironment()
 
-            var args: [String] = []
-            if !cookies.isEmpty && FileManager.default.fileExists(atPath: cookies) {
-                args += ["--cookies", cookies]
-            }
+            var args: [String] = Self.cookieArgs(source: cookieSrc, browser: cookieBrowser, filePath: cookieFile)
             args += [
                 "-f", formatStr,
                 "--newline",
@@ -499,11 +571,16 @@ final class DownloadManager {
 
     // MARK: - Title Fetching
 
-    nonisolated static func fetchTitleSync(url: String, ytdlpPath: String) -> String {
+    nonisolated static func fetchTitleSync(
+        url: String, ytdlpPath: String,
+        cookieSource: CookieSource = .none, cookieBrowser: BrowserChoice = .chrome, cookieFile: String = ""
+    ) -> String {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: ytdlpPath)
-        process.arguments = ["--print", "title", "--no-download", "--no-warnings", url]
+        var args = cookieArgs(source: cookieSource, browser: cookieBrowser, filePath: cookieFile)
+        args += ["--print", "title", "--no-download", "--no-warnings", url]
+        process.arguments = args
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         process.environment = shellEnvironment()

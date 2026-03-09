@@ -107,23 +107,51 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Authentication") {
-                HStack {
-                    TextField("Cookies File (optional)", text: $manager.cookiesPath)
-                        .textFieldStyle(.roundedBorder)
-
-                    Button("Browse…") {
-                        chooseCookiesFile()
+            Section("Cookies") {
+                Picker("Cookie Source", selection: $manager.cookieSource) {
+                    ForEach(CookieSource.allCases) { source in
+                        Text(source.rawValue).tag(source)
                     }
                 }
+                .pickerStyle(.segmented)
 
-                Text("Export cookies from your browser for age-restricted or private videos. Use a browser extension like \"Get cookies.txt LOCALLY\".")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                switch manager.cookieSource {
+                case .none:
+                    Text("No cookies — some age-restricted or private videos may not work.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                case .browser:
+                    Picker("Browser", selection: $manager.cookiesBrowser) {
+                        ForEach(BrowserChoice.allCases) { browser in
+                            Label(browser.displayName, systemImage: browser.icon)
+                                .tag(browser)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("yt-dlp will read cookies directly from the selected browser. The browser may ask for permission on first use.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                case .file:
+                    HStack {
+                        TextField("Cookies File", text: $manager.cookiesPath)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Browse…") {
+                            chooseCookiesFile()
+                        }
+                    }
+
+                    Text("Use a manually exported cookies.txt file. In most cases, \"From Browser\" is easier.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 420)
+        .frame(width: 520, height: 480)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
@@ -132,6 +160,8 @@ struct SettingsView: View {
         .onChange(of: manager.downloadPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.ytdlpPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.cookiesPath) { _, _ in manager.saveSettings() }
+        .onChange(of: manager.cookieSource) { _, _ in manager.saveSettings() }
+        .onChange(of: manager.cookiesBrowser) { _, _ in manager.saveSettings() }
         .onChange(of: manager.maxConcurrentDownloads) { _, _ in manager.saveSettings() }
         .onChange(of: manager.selectedQuality) { _, _ in manager.saveSettings() }
     }

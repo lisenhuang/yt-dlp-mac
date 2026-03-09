@@ -72,7 +72,7 @@ jobs:
           ### Install
           1. Download **yt-dlp-mac.dmg** below
           2. Open the DMG and drag \`yt-dlp-mac.app\` to Applications
-          3. First launch: right-click the app → Open (required once for unsigned builds)
+          3. First launch: macOS will block the app — go to **System Settings → Privacy & Security** and click **Open Anyway**
           4. yt-dlp is downloaded automatically on first launch — no manual install needed"
 
           gh release create "$TAG" \
