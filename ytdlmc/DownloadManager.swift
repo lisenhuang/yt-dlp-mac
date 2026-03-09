@@ -31,6 +31,26 @@ final class DownloadManager {
     var maxConcurrentDownloads: Int
     var selectedQuality: VideoQuality
     var ytdlpFound: Bool = false
+    var ytdlpSetupStatus: YTDLPSetupStatus = .unknown
+    var ytdlpVersion: String = ""
+
+    enum YTDLPSetupStatus: Equatable {
+        case unknown
+        case downloading
+        case ready
+        case failed(String)
+    }
+
+    nonisolated static let ytdlpDownloadURL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+
+    nonisolated static var bundledYTDLPDirectory: String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("yt-dlp-mac").path()
+    }
+
+    nonisolated static var bundledYTDLPPath: String {
+        bundledYTDLPDirectory + "/yt-dlp"
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -42,9 +62,10 @@ final class DownloadManager {
         self.selectedQuality = VideoQuality(rawValue: defaults.string(forKey: "quality") ?? "") ?? .best
 
         if ytdlpPath.isEmpty {
-            ytdlpPath = Self.findYTDLP()
+            ytdlpPath = Self.resolveYTDLPPath()
         }
         ytdlpFound = FileManager.default.isExecutableFile(atPath: ytdlpPath)
+        ytdlpSetupStatus = ytdlpFound ? .ready : .unknown
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
@@ -57,11 +78,20 @@ final class DownloadManager {
         defaults.set(maxConcurrentDownloads, forKey: "maxConcurrent")
         defaults.set(selectedQuality.rawValue, forKey: "quality")
         ytdlpFound = FileManager.default.isExecutableFile(atPath: ytdlpPath)
+        ytdlpSetupStatus = ytdlpFound ? .ready : .unknown
     }
 
-    // MARK: - yt-dlp Discovery
+    // MARK: - yt-dlp Discovery & Auto-Install
 
-    nonisolated static func findYTDLP() -> String {
+    /// Priority: bundled (Application Support) → Homebrew → system PATH
+    nonisolated static func resolveYTDLPPath() -> String {
+        if FileManager.default.isExecutableFile(atPath: bundledYTDLPPath) {
+            return bundledYTDLPPath
+        }
+        return findSystemYTDLP()
+    }
+
+    nonisolated static func findSystemYTDLP() -> String {
         let candidates = [
             "/opt/homebrew/bin/yt-dlp",
             "/usr/local/bin/yt-dlp",
@@ -88,7 +118,84 @@ final class DownloadManager {
                 return result
             }
         } catch {}
-        return "/opt/homebrew/bin/yt-dlp"
+        return bundledYTDLPPath
+    }
+
+    /// Downloads the latest yt-dlp binary from GitHub to Application Support.
+    func installOrUpdateYTDLP() {
+        ytdlpSetupStatus = .downloading
+
+        Task.detached {
+            do {
+                let dir = Self.bundledYTDLPDirectory
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+                let url = URL(string: Self.ytdlpDownloadURL)!
+                let (tempURL, response) = try await URLSession.shared.download(from: url)
+
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    await MainActor.run {
+                        self.ytdlpSetupStatus = .failed("Download failed (bad response)")
+                    }
+                    return
+                }
+
+                let destination = URL(fileURLWithPath: Self.bundledYTDLPPath)
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: tempURL, to: destination)
+
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755],
+                    ofItemAtPath: Self.bundledYTDLPPath
+                )
+
+                await MainActor.run {
+                    self.ytdlpPath = Self.bundledYTDLPPath
+                    self.ytdlpFound = true
+                    self.ytdlpSetupStatus = .ready
+                    self.saveSettings()
+                    self.fetchYTDLPVersion()
+                }
+            } catch {
+                await MainActor.run {
+                    self.ytdlpSetupStatus = .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// Ensures yt-dlp is available, downloading if needed.
+    func ensureYTDLPAvailable() {
+        if ytdlpFound { return }
+        installOrUpdateYTDLP()
+    }
+
+    func fetchYTDLPVersion() {
+        guard ytdlpFound else { return }
+        let path = ytdlpPath
+        Task.detached {
+            let version = Self.getVersionSync(ytdlpPath: path)
+            await MainActor.run {
+                self.ytdlpVersion = version
+            }
+        }
+    }
+
+    nonisolated static func getVersionSync(ytdlpPath: String) -> String {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: ytdlpPath)
+        process.arguments = ["--version"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        } catch {
+            return ""
+        }
     }
 
     nonisolated static func shellEnvironment() -> [String: String] {

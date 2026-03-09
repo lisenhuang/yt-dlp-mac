@@ -7,7 +7,6 @@ struct ContentView: View {
     @State private var urlText = ""
     @State private var isDropTargeted = false
     @State private var showSettings = false
-    @State private var showYTDLPMissing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,20 +26,13 @@ struct ContentView: View {
                 dropOverlay
             }
         }
-        .alert("yt-dlp Not Found", isPresented: $showYTDLPMissing) {
-            Button("Open Settings") { showSettings = true }
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("yt-dlp is required to download videos.\n\nInstall it with: brew install yt-dlp\n\nOr set the path manually in Settings.")
-        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environment(manager)
         }
         .onAppear {
-            if !manager.ytdlpFound {
-                showYTDLPMissing = true
-            }
+            manager.ensureYTDLPAvailable()
+            manager.fetchYTDLPVersion()
         }
     }
 
@@ -93,14 +85,26 @@ struct ContentView: View {
     }
 
     private var downloadButton: some View {
-        Button(action: startDownload) {
-            Label("Download", systemImage: "arrow.down.circle.fill")
-                .fontWeight(.semibold)
+        Group {
+            if manager.ytdlpSetupStatus == .downloading {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Setting up…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Button(action: startDownload) {
+                    Label("Download", systemImage: "arrow.down.circle.fill")
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !manager.ytdlpFound)
+                .keyboardShortcut(.return, modifiers: .command)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.regular)
-        .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .keyboardShortcut(.return, modifiers: .command)
     }
 
     // MARK: - Path Bar
@@ -273,11 +277,6 @@ struct ContentView: View {
     private func startDownload() {
         let url = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return }
-
-        if !manager.ytdlpFound {
-            showYTDLPMissing = true
-            return
-        }
 
         withAnimation {
             manager.addDownload(url: url)

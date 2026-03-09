@@ -35,34 +35,74 @@ struct SettingsView: View {
 
             Section("yt-dlp") {
                 HStack {
-                    TextField("yt-dlp Path", text: $manager.ytdlpPath)
-                        .textFieldStyle(.roundedBorder)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            if manager.ytdlpFound {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("yt-dlp installed")
+                                    .fontWeight(.medium)
+                            } else if manager.ytdlpSetupStatus == .downloading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Downloading yt-dlp…")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("yt-dlp not found")
+                                    .fontWeight(.medium)
+                            }
+                        }
+
+                        if !manager.ytdlpVersion.isEmpty {
+                            Text("Version \(manager.ytdlpVersion)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(manager.ytdlpPath)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer()
 
                     if manager.ytdlpFound {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                        Button("Update") {
+                            manager.installOrUpdateYTDLP()
+                        }
+                        .disabled(manager.ytdlpSetupStatus == .downloading)
                     } else {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    }
-
-                    Button("Browse…") {
-                        chooseYTDLPPath()
-                    }
-
-                    Button("Auto-detect") {
-                        manager.ytdlpPath = DownloadManager.findYTDLP()
-                        manager.ytdlpFound = FileManager.default.isExecutableFile(atPath: manager.ytdlpPath)
+                        Button("Install") {
+                            manager.installOrUpdateYTDLP()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(manager.ytdlpSetupStatus == .downloading)
                     }
                 }
 
-                if !manager.ytdlpFound {
-                    Label(
-                        "yt-dlp not found. Install it with: brew install yt-dlp",
-                        systemImage: "info.circle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                if case .failed(let msg) = manager.ytdlpSetupStatus {
+                    Label(msg, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                DisclosureGroup("Advanced") {
+                    HStack {
+                        TextField("Custom yt-dlp path", text: $manager.ytdlpPath)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Browse…") {
+                            chooseYTDLPPath()
+                        }
+                    }
+
+                    Text("Override the yt-dlp binary path if you have a custom installation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -82,7 +122,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 380)
+        .frame(width: 520, height: 420)
         .onChange(of: manager.downloadPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.ytdlpPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.cookiesPath) { _, _ in manager.saveSettings() }
@@ -113,6 +153,7 @@ struct SettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             manager.ytdlpPath = url.path()
             manager.saveSettings()
+            manager.fetchYTDLPVersion()
         }
     }
 

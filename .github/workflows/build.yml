@@ -64,19 +64,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v$(date -u +%Y.%m.%d.%H%M)"
-          TITLE="Build $(date -u +%Y-%m-%d %H:%M) UTC (${GITHUB_SHA::7})"
+          TAG="v$(date -u '+%Y.%m.%d.%H%M')"
+          TITLE="Build $(date -u '+%Y-%m-%d %H:%M') UTC (${GITHUB_SHA::7})"
 
-          BODY=$(cat <<'EOF'
-          Automated build from `main`.
+          BODY="Automated build from \`main\`.
 
           ### Install
           1. Download **yt-dlp-mac.dmg** below
-          2. Open the DMG and drag `yt-dlp-mac.app` to Applications
-          3. Make sure `yt-dlp` is installed (`brew install yt-dlp`)
-          4. First launch: right-click the app → Open (required once for unsigned builds)
-          EOF
-          )
+          2. Open the DMG and drag \`yt-dlp-mac.app\` to Applications
+          3. First launch: right-click the app → Open (required once for unsigned builds)
+          4. yt-dlp is downloaded automatically on first launch — no manual install needed"
 
           gh release create "$TAG" \
             "${{ runner.temp }}/yt-dlp-mac.dmg" \

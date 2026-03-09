@@ -20,6 +20,7 @@ No terminal needed — just paste a URL and click Download.
 - 🔔 **macOS notifications** — get notified when downloads finish
 - 📂 **Open / Reveal** — open completed files or show them in Finder
 - 🍪 **Cookies support** — use a cookies file for age-restricted or private videos
+- 🔄 **Auto-install yt-dlp** — downloads yt-dlp automatically on first launch, with one-click updates in Settings
 
 ## 📥 Download
 
@@ -28,13 +29,7 @@ No terminal needed — just paste a URL and click Download.
 ## 📋 Requirements
 
 - macOS 15.0 or later
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed on your system
-
-```bash
-brew install yt-dlp
-```
-
-Or see the [yt-dlp installation guide](https://github.com/yt-dlp/yt-dlp#installation) for other methods.
+- **No other dependencies** — yt-dlp is automatically downloaded on first launch
 
 ## 🚀 Getting Started
 
@@ -50,7 +45,7 @@ Or see the [yt-dlp installation guide](https://github.com/yt-dlp/yt-dlp#installa
 1. **Download** [`yt-dlp-mac.dmg`](https://github.com/lisenhuang/yt-dlp-mac/releases/latest/download/yt-dlp-mac.dmg) or grab it from [Releases](https://github.com/lisenhuang/yt-dlp-mac/releases)
 2. **Open** the DMG and drag `yt-dlp-mac.app` to your Applications folder
 3. **First launch** — right-click the app → Open (required once for unsigned builds)
-4. The app auto-detects your yt-dlp installation. If not found, it will prompt you to configure the path in Settings.
+4. The app automatically downloads yt-dlp on first launch — no manual installation needed
 
 ## 🎯 Usage
 
@@ -82,7 +77,7 @@ Open Settings via the gear icon or `Cmd+,`.
 | 📁 **Download Folder** | Where videos are saved |
 | 🎚️ **Default Quality** | Quality preset for new downloads |
 | ⚡ **Max Concurrent Downloads** | How many videos download at once (1–10) |
-| 🔧 **yt-dlp Path** | Path to the yt-dlp binary (auto-detected) |
+| 🔧 **yt-dlp** | Auto-installed; shows version with one-click Update button |
 | 🍪 **Cookies File** | Optional `cookies.txt` for age-restricted or private videos |
 
 ### 🍪 Cookies
