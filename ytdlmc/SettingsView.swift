@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(DownloadManager.self) private var manager
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         @Bindable var manager = manager
@@ -123,6 +124,11 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 420)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
         .onChange(of: manager.downloadPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.ytdlpPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.cookiesPath) { _, _ in manager.saveSettings() }
