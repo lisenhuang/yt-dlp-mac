@@ -46,15 +46,15 @@ jobs:
 
       - name: Create DMG
         run: |
-          APP_PATH="${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/ytdlmc.app"
-          DMG_PATH="${{ runner.temp }}/ytdlmc.dmg"
+          APP_PATH="${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/yt-dlp-mac.app"
+          DMG_PATH="${{ runner.temp }}/yt-dlp-mac.dmg"
           STAGING="${{ runner.temp }}/dmg-staging"
 
           mkdir -p "$STAGING"
-          cp -R "$APP_PATH" "$STAGING/ytdlmc.app"
+          cp -R "$APP_PATH" "$STAGING/yt-dlp-mac.app"
           ln -s /Applications "$STAGING/Applications"
 
-          hdiutil create -volname "ytdlmc" \
+          hdiutil create -volname "yt-dlp-mac" \
             -srcfolder "$STAGING" \
             -ov -format UDZO \
             "$DMG_PATH"
@@ -71,15 +71,15 @@ jobs:
           Automated build from `main`.
 
           ### Install
-          1. Download **ytdlmc.dmg** below
-          2. Open the DMG and drag `ytdlmc.app` to Applications
+          1. Download **yt-dlp-mac.dmg** below
+          2. Open the DMG and drag `yt-dlp-mac.app` to Applications
           3. Make sure `yt-dlp` is installed (`brew install yt-dlp`)
           4. First launch: right-click the app → Open (required once for unsigned builds)
           EOF
           )
 
           gh release create "$TAG" \
-            "${{ runner.temp }}/ytdlmc.dmg" \
+            "${{ runner.temp }}/yt-dlp-mac.dmg" \
             --title "$TITLE" \
             --notes "$BODY" \
             --latest
