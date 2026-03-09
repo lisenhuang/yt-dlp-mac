@@ -44,11 +44,17 @@ No terminal needed — just paste a URL and click Download.
 
 1. **Download** [`yt-dlp-mac.dmg`](https://github.com/lisenhuang/yt-dlp-mac/releases/latest/download/yt-dlp-mac.dmg) or grab it from [Releases](https://github.com/lisenhuang/yt-dlp-mac/releases)
 2. **Open** the DMG and drag `yt-dlp-mac.app` to your Applications folder
-3. **First launch** — macOS will block the app because it's unsigned. To allow it:
-   - Open **System Settings → Privacy & Security**
-   - Scroll down to the Security section — you'll see a message about `yt-dlp-mac` being blocked
-   - Click **"Open Anyway"**
-   - You only need to do this once
+3. **First launch** — macOS will block the app because it's unsigned:
+
+   You'll see this dialog — click **"Done"** (not "Move to Bin"):
+
+   ![Gatekeeper dialog](assets/screenshot-gatekeeper.png)
+
+   Then go to **System Settings → Privacy & Security**, find the blocked message, and click **"Open Anyway"**:
+
+   ![Open Anyway](assets/screenshot-open-anyway.png)
+
+   You only need to do this once.
 4. The app automatically downloads yt-dlp on first launch — no manual installation needed
 
 ## 🎯 Usage
