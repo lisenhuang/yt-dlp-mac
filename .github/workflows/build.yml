@@ -44,12 +44,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             archive
 
-      - name: Prepare release asset
+      - name: Create DMG
         run: |
-          cp -R "${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/ytdlmc.app" \
-                "${{ runner.temp }}/ytdlmc.app"
-          cd "${{ runner.temp }}"
-          zip -r -y ytdlmc-mac.zip ytdlmc.app
+          APP_PATH="${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/ytdlmc.app"
+          DMG_PATH="${{ runner.temp }}/ytdlmc.dmg"
+          STAGING="${{ runner.temp }}/dmg-staging"
+
+          mkdir -p "$STAGING"
+          cp -R "$APP_PATH" "$STAGING/ytdlmc.app"
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create -volname "ytdlmc" \
+            -srcfolder "$STAGING" \
+            -ov -format UDZO \
+            "$DMG_PATH"
 
       - name: Create release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,20 +70,16 @@ jobs:
           BODY=$(cat <<'EOF'
           Automated build from `main`.
 
-          **Commit:** ${{ github.sha }}
-          **Message:** ${{ github.event.head_commit.message }}
-
           ### Install
-          1. Download `ytdlmc-mac.zip` below
-          2. Unzip and drag `ytdlmc.app` to Applications
+          1. Download **ytdlmc.dmg** below
+          2. Open the DMG and drag `ytdlmc.app` to Applications
           3. Make sure `yt-dlp` is installed (`brew install yt-dlp`)
-
-          > **Note:** This build is unsigned. On first launch, right-click → Open to bypass Gatekeeper.
+          4. First launch: right-click the app → Open (required once for unsigned builds)
           EOF
           )
 
           gh release create "$TAG" \
-            "${{ runner.temp }}/ytdlmc-mac.zip" \
+            "${{ runner.temp }}/ytdlmc.dmg" \
             --title "$TITLE" \
             --notes "$BODY" \
             --latest
