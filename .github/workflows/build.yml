@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -scheme ytdlmc \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Archive
+        run: |
+          xcodebuild \
+            -scheme ytdlmc \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -archivePath ${{ runner.temp }}/ytdlmc.xcarchive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Prepare artifact
+        run: |
+          cp -R "${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/ytdlmc.app" \
+                "${{ runner.temp }}/ytdlmc.app"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ytdlmc-${{ github.sha }}
+          path: ${{ runner.temp }}/ytdlmc.app
+          if-no-files-found: warn
