@@ -1,4 +1,4 @@
-name: Build
+name: Build & Release
 
 on:
   push:
@@ -6,12 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select Xcode
         run: |
@@ -39,14 +44,38 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             archive
 
-      - name: Prepare artifact
+      - name: Prepare release asset
         run: |
           cp -R "${{ runner.temp }}/ytdlmc.xcarchive/Products/Applications/ytdlmc.app" \
                 "${{ runner.temp }}/ytdlmc.app"
+          cd "${{ runner.temp }}"
+          zip -r -y ytdlmc-mac.zip ytdlmc.app
 
-      - name: Upload app
-        uses: actions/upload-artifact@v4
-        with:
-          name: ytdlmc-${{ github.sha }}
-          path: ${{ runner.temp }}/ytdlmc.app
-          if-no-files-found: warn
+      - name: Create release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(date +%Y.%m.%d)-$(echo ${{ github.sha }} | cut -c1-7)"
+          TITLE="Build $(date +%Y-%m-%d) (${GITHUB_SHA::7})"
+
+          BODY=$(cat <<'EOF'
+          Automated build from `main`.
+
+          **Commit:** ${{ github.sha }}
+          **Message:** ${{ github.event.head_commit.message }}
+
+          ### Install
+          1. Download `ytdlmc-mac.zip` below
+          2. Unzip and drag `ytdlmc.app` to Applications
+          3. Make sure `yt-dlp` is installed (`brew install yt-dlp`)
+
+          > **Note:** This build is unsigned. On first launch, right-click → Open to bypass Gatekeeper.
+          EOF
+          )
+
+          gh release create "$TAG" \
+            "${{ runner.temp }}/ytdlmc-mac.zip" \
+            --title "$TITLE" \
+            --notes "$BODY" \
+            --latest
