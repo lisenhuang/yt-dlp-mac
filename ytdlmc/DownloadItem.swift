@@ -71,6 +71,7 @@ final class DownloadItem: Identifiable {
     var fileSize: String = ""
     var filePath: String?
     var downloadStage: String = ""
+    var completedAt: Date?
 
     @ObservationIgnored var process: Process?
 

@@ -500,6 +500,7 @@ final class DownloadManager {
                     item.speed = ""
                     item.eta = ""
                     item.downloadStage = ""
+                    item.completedAt = Date()
                     if let fp = finalPath {
                         item.filePath = fp.hasPrefix("/") ? fp : "\(dest)/\(fp)"
                     }

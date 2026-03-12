@@ -21,11 +21,18 @@ struct DownloadRowView: View {
                         .font(.headline)
                         .lineLimit(2)
 
-                    Text(item.url)
+                    Link(item.url, destination: URL(string: item.url)!)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .onHover { hovering in
+                            if hovering {
+                                NSCursor.pointingHand.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
                 }
 
                 Spacer()
@@ -171,9 +178,16 @@ struct DownloadRowView: View {
 
     private var completedView: some View {
         HStack(spacing: 12) {
-            Text("Download complete")
-                .font(.caption)
-                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Download complete")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                if let completedAt = item.completedAt {
+                    Text(completedAt, format: .dateTime.hour().minute().second())
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
 
             Spacer()
 
