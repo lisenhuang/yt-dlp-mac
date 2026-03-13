@@ -122,9 +122,15 @@ struct DownloadRowView: View {
     // MARK: - Status Views
 
     private var queuedView: some View {
-        Text("Waiting in queue…")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Text("Waiting in queue…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            removeButton("Remove queued download")
+        }
     }
 
     private var fetchingInfoView: some View {
@@ -132,6 +138,10 @@ struct DownloadRowView: View {
             Text("Fetching video info…")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            Spacer()
+
+            removeButton("Remove download")
         }
     }
 
@@ -166,6 +176,8 @@ struct DownloadRowView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Cancel download")
+
+                removeButton("Remove download")
             }
             .font(.caption)
         }
@@ -185,6 +197,8 @@ struct DownloadRowView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+
+                removeButton("Remove download")
             }
             .font(.caption)
         }
@@ -287,6 +301,15 @@ struct DownloadRowView: View {
     }
 
     // MARK: - Context Menu
+
+    private func removeButton(_ helpText: String) -> some View {
+        Button(role: .destructive, action: onRemove) {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(helpText)
+    }
 
     @ViewBuilder
     private var contextMenuItems: some View {

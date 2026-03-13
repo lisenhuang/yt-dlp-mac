@@ -303,13 +303,22 @@ final class DownloadManager {
     }
 
     func cancelDownload(_ item: DownloadItem) {
+        item.activityToken = UUID()
         item.status = .cancelled
+        item.workerTask?.cancel()
         item.process?.terminate()
         item.process = nil
+        item.workerTask = nil
+        item.downloadStage = ""
         startNextDownloads()
     }
 
     func retryDownload(_ item: DownloadItem) {
+        item.activityToken = UUID()
+        item.workerTask?.cancel()
+        item.process?.terminate()
+        item.process = nil
+        item.workerTask = nil
         item.status = .queued
         item.progress = 0
         item.speed = ""
@@ -321,10 +330,13 @@ final class DownloadManager {
     }
 
     func removeDownload(_ item: DownloadItem) {
+        item.activityToken = UUID()
+        item.workerTask?.cancel()
         if item.status.isActive {
             item.process?.terminate()
             item.process = nil
         }
+        item.workerTask = nil
         downloads.removeAll { $0.id == item.id }
         startNextDownloads()
     }
@@ -378,6 +390,8 @@ final class DownloadManager {
 
     private func beginDownload(_ item: DownloadItem) {
         item.status = .fetchingInfo
+        let activityToken = UUID()
+        item.activityToken = activityToken
 
         let url = item.url
         let ytdlp = self.ytdlpPath
@@ -389,7 +403,7 @@ final class DownloadManager {
         let outputFmt = item.quality.outputFormat
         let isAudioOnly = item.quality == .audioOnly
 
-        Task.detached {
+        let workerTask = Task.detached {
             let metadata = Self.fetchMetadataSync(
                 url: url,
                 ytdlpPath: ytdlp,
@@ -398,7 +412,13 @@ final class DownloadManager {
                 cookieBrowser: cookieBrowser,
                 cookieFile: cookieFile
             )
+            let isStillCurrent = await MainActor.run {
+                item.activityToken == activityToken
+            }
+            guard isStillCurrent, !Task.isCancelled else { return }
+
             await MainActor.run {
+                guard item.activityToken == activityToken else { return }
                 item.title = metadata.title
                 item.duration = metadata.duration
                 item.fileSize = metadata.fileSize
@@ -430,18 +450,31 @@ final class DownloadManager {
             process.standardOutput = pipe
             process.standardError = errorPipe
 
-            await MainActor.run {
-                item.process = process
+            let canStartProcess = await MainActor.run {
+                item.activityToken == activityToken
             }
+            guard canStartProcess, !Task.isCancelled else { return }
 
             do {
                 try process.run()
             } catch {
                 await MainActor.run {
+                    guard item.activityToken == activityToken else { return }
                     item.status = .failed("Cannot start yt-dlp: \(error.localizedDescription)")
                     item.process = nil
+                    item.workerTask = nil
                     self.startNextDownloads()
                 }
+                return
+            }
+
+            let shouldKeepProcess = await MainActor.run {
+                guard item.activityToken == activityToken else { return false }
+                item.process = process
+                return true
+            }
+            guard shouldKeepProcess else {
+                process.terminate()
                 return
             }
 
@@ -459,6 +492,7 @@ final class DownloadManager {
                     }
 
                     Task { @MainActor in
+                        guard item.activityToken == activityToken else { return }
                         if let p = parsed.progress {
                             item.progress = p
                         }
@@ -507,6 +541,7 @@ final class DownloadManager {
             let finalError = state.errorMessage
 
             await MainActor.run {
+                guard item.activityToken == activityToken else { return }
                 if exitCode == 0 {
                     item.status = .completed
                     item.progress = 1.0
@@ -526,9 +561,12 @@ final class DownloadManager {
                     item.status = .failed(finalError ?? "yt-dlp exited with code \(exitCode)")
                 }
                 item.process = nil
+                item.workerTask = nil
                 self.startNextDownloads()
             }
         }
+
+        item.workerTask = workerTask
     }
 
     // MARK: - Output Parsing

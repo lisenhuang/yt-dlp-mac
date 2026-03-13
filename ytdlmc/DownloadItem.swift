@@ -75,6 +75,8 @@ final class DownloadItem: Identifiable {
     var completedAt: Date?
 
     @ObservationIgnored var process: Process?
+    @ObservationIgnored var workerTask: Task<Void, Never>?
+    @ObservationIgnored var activityToken = UUID()
 
     init(url: String, quality: VideoQuality) {
         self.url = url
