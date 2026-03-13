@@ -68,6 +68,7 @@ final class DownloadItem: Identifiable {
     var progress: Double = 0
     var speed: String = ""
     var eta: String = ""
+    var duration: String = ""
     var fileSize: String = ""
     var filePath: String?
     var downloadStage: String = ""

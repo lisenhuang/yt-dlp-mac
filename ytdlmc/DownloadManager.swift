@@ -22,6 +22,12 @@ struct ParsedLine: Sendable {
     }
 }
 
+struct VideoMetadata: Sendable {
+    var title: String
+    var duration: String
+    var fileSize: String
+}
+
 enum CookieSource: String, CaseIterable, Identifiable {
     case none = "None"
     case browser = "From Browser"
@@ -308,6 +314,7 @@ final class DownloadManager {
         item.progress = 0
         item.speed = ""
         item.eta = ""
+        item.duration = ""
         item.fileSize = ""
         item.downloadStage = ""
         startNextDownloads()
@@ -383,12 +390,18 @@ final class DownloadManager {
         let isAudioOnly = item.quality == .audioOnly
 
         Task.detached {
-            let title = Self.fetchTitleSync(
-                url: url, ytdlpPath: ytdlp,
-                cookieSource: cookieSrc, cookieBrowser: cookieBrowser, cookieFile: cookieFile
+            let metadata = Self.fetchMetadataSync(
+                url: url,
+                ytdlpPath: ytdlp,
+                formatString: formatStr,
+                cookieSource: cookieSrc,
+                cookieBrowser: cookieBrowser,
+                cookieFile: cookieFile
             )
             await MainActor.run {
-                item.title = title
+                item.title = metadata.title
+                item.duration = metadata.duration
+                item.fileSize = metadata.fileSize
                 item.status = .downloading
                 item.downloadStage = "Starting…"
             }
@@ -502,7 +515,11 @@ final class DownloadManager {
                     item.downloadStage = ""
                     item.completedAt = Date()
                     if let fp = finalPath {
-                        item.filePath = fp.hasPrefix("/") ? fp : "\(dest)/\(fp)"
+                        let resolvedPath = fp.hasPrefix("/") ? fp : "\(dest)/\(fp)"
+                        item.filePath = resolvedPath
+                        if let fileSize = Self.fileSizeForPath(resolvedPath) {
+                            item.fileSize = fileSize
+                        }
                     }
                     self.sendNotification(title: "Download Complete", body: item.title)
                 } else if item.status != .cancelled {
@@ -572,15 +589,26 @@ final class DownloadManager {
 
     // MARK: - Title Fetching
 
-    nonisolated static func fetchTitleSync(
-        url: String, ytdlpPath: String,
+    nonisolated static func fetchMetadataSync(
+        url: String,
+        ytdlpPath: String,
+        formatString: String,
         cookieSource: CookieSource = .none, cookieBrowser: BrowserChoice = .chrome, cookieFile: String = ""
-    ) -> String {
+    ) -> VideoMetadata {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: ytdlpPath)
         var args = cookieArgs(source: cookieSource, browser: cookieBrowser, filePath: cookieFile)
-        args += ["--print", "title", "--no-download", "--no-warnings", url]
+        args += [
+            "-f", formatString,
+            "--print", "title",
+            "--print", "duration_string",
+            "--print", "filesize",
+            "--print", "filesize_approx",
+            "--no-download",
+            "--no-warnings",
+            url,
+        ]
         process.arguments = args
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -590,12 +618,57 @@ final class DownloadManager {
             try process.run()
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let title = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return title.isEmpty ? "Unknown Title" : title
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return parseMetadataOutput(output)
         } catch {
-            return "Unknown Title"
+            return VideoMetadata(title: "Unknown Title", duration: "", fileSize: "")
         }
+    }
+
+    nonisolated static func parseMetadataOutput(_ output: String) -> VideoMetadata {
+        let lines = output.components(separatedBy: .newlines)
+        let title = sanitizedMetadataValue(lines[safe: 0]) ?? "Unknown Title"
+        let duration = sanitizedMetadataValue(lines[safe: 1]) ?? ""
+        let fileSize = [lines[safe: 2], lines[safe: 3]]
+            .compactMap(sanitizedMetadataValue)
+            .compactMap(formattedByteCount)
+            .first ?? ""
+
+        return VideoMetadata(title: title, duration: duration, fileSize: fileSize)
+    }
+
+    nonisolated static func sanitizedMetadataValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              trimmed != "NA"
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    nonisolated static func formattedByteCount(_ rawValue: String) -> String? {
+        guard let bytes = Int64(rawValue) else {
+            return nil
+        }
+
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    nonisolated static func fileSizeForPath(_ path: String) -> String? {
+        guard
+            let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+            let fileSize = attributes[.size] as? NSNumber
+        else {
+            return nil
+        }
+
+        return formattedByteCount(fileSize.stringValue)
     }
 
     // MARK: - Notifications
@@ -636,5 +709,11 @@ final class DownloadManager {
               let range = Range(match.range, in: text)
         else { return nil }
         return String(text[range])
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

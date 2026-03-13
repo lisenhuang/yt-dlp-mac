@@ -33,6 +33,20 @@ struct DownloadRowView: View {
                                 NSCursor.pop()
                             }
                         }
+
+                    if !item.fileSize.isEmpty || !item.duration.isEmpty {
+                        HStack(spacing: 10) {
+                            if !item.fileSize.isEmpty {
+                                Label(item.fileSize, systemImage: "internaldrive")
+                            }
+
+                            if !item.duration.isEmpty {
+                                Label(item.duration, systemImage: "clock")
+                            }
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    }
                 }
 
                 Spacer()
