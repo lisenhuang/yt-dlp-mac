@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(DownloadManager.self) private var manager
     @Environment(\.dismiss) private var dismiss
+    @State private var showCookiePreviewSheet = false
+    @State private var didCopyCookieContent = false
 
     var body: some View {
         @Bindable var manager = manager
@@ -134,6 +136,46 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    Text("The app uses a cached browser-cookie snapshot first, and refreshes that cache only when needed, such as after a failure or when no cache exists yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let cachedAt = manager.browserCookiesCachedAt {
+                        Text("Last cookie cached: \(cachedAt.formatted(date: .abbreviated, time: .standard))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Last cookie cached: Never")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Button {
+                            didCopyCookieContent = false
+                            if manager.browserCookiesPreview.isEmpty {
+                                manager.fetchBrowserCookiesPreview()
+                            } else {
+                                showCookiePreviewSheet = true
+                            }
+                        } label: {
+                            if manager.isFetchingBrowserCookiesPreview {
+                                Label("Reading Cookies...", systemImage: "hourglass")
+                            } else {
+                                Text("View Cookie Content")
+                            }
+                        }
+                        .disabled(manager.isFetchingBrowserCookiesPreview)
+
+                        Spacer()
+                    }
+
+                    if !manager.browserCookiesPreviewError.isEmpty {
+                        Text(manager.browserCookiesPreviewError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
                 case .file:
                     HStack {
                         TextField("Cookies File", text: $manager.cookiesPath)
@@ -144,9 +186,39 @@ struct SettingsView: View {
                         }
                     }
 
-                    Text("Use a manually exported cookies.txt file. In most cases, \"From Browser\" is easier.")
+                    Text("Use a manually exported cookies.txt file. If downloads start failing with 403 or Forbidden, you usually need to export a fresh file and select it again here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Diagnostics") {
+                HStack {
+                    Button("Copy Error Log") {
+                        manager.copyDiagnosticsLog()
+                    }
+                    .disabled(manager.diagnosticsLog.isEmpty)
+
+                    Button("Clear Log") {
+                        manager.clearDiagnosticsLog()
+                    }
+                    .disabled(manager.diagnosticsLog.isEmpty)
+
+                    Spacer()
+                }
+
+                if manager.diagnosticsLog.isEmpty {
+                    Text("Recent download failures will be recorded here so they can be copied for debugging.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        Text(manager.diagnosticsLog)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(minHeight: 140, maxHeight: 180)
                 }
             }
         }
@@ -157,13 +229,67 @@ struct SettingsView: View {
                 Button("Done") { dismiss() }
             }
         }
+        .sheet(isPresented: $showCookiePreviewSheet) {
+            cookiePreviewSheet
+        }
         .onChange(of: manager.downloadPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.ytdlpPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.cookiesPath) { _, _ in manager.saveSettings() }
-        .onChange(of: manager.cookieSource) { _, _ in manager.saveSettings() }
-        .onChange(of: manager.cookiesBrowser) { _, _ in manager.saveSettings() }
+        .onChange(of: manager.cookieSource) { _, newValue in
+            if newValue != .browser {
+                manager.invalidateBrowserCookiesCache()
+            } else {
+                manager.saveSettings()
+            }
+        }
+        .onChange(of: manager.cookiesBrowser) { _, _ in manager.invalidateBrowserCookiesCache() }
         .onChange(of: manager.maxConcurrentDownloads) { _, _ in manager.saveSettings() }
         .onChange(of: manager.selectedQuality) { _, _ in manager.saveSettings() }
+        .onChange(of: manager.browserCookiesPreview) { _, newValue in
+            if !newValue.isEmpty {
+                showCookiePreviewSheet = true
+            }
+        }
+    }
+
+    private var cookiePreviewSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Cookie Content")
+                .font(.headline)
+
+            TextEditor(text: .constant(manager.browserCookiesPreview))
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+
+            HStack {
+                Button {
+                    manager.copyBrowserCookiesPreview()
+                    didCopyCookieContent = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        didCopyCookieContent = false
+                    }
+                } label: {
+                    if didCopyCookieContent {
+                        Label("Copied", systemImage: "checkmark")
+                    } else {
+                        Text("Copy Cookie Content")
+                    }
+                }
+
+                Spacer()
+
+                Button("Done") {
+                    showCookiePreviewSheet = false
+                }
+            }
+
+            Text("This exports and displays browser cookies for inspection. Treat it as sensitive data.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(minWidth: 640, minHeight: 420)
     }
 
     private func chooseDownloadFolder() {

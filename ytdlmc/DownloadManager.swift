@@ -28,6 +28,11 @@ struct VideoMetadata: Sendable {
     var fileSize: String
 }
 
+struct BrowserCookieExportResult: Sendable {
+    var cookieText: String?
+    var errorMessage: String?
+}
+
 enum CookieSource: String, CaseIterable, Identifiable {
     case none = "None"
     case browser = "From Browser"
@@ -85,6 +90,12 @@ final class DownloadManager {
     var ytdlpFound: Bool = false
     var ytdlpSetupStatus: YTDLPSetupStatus = .unknown
     var ytdlpVersion: String = ""
+    var diagnosticsLog: String
+    var lastBrowserCookieReadAt: Date?
+    var browserCookiesPreview: String = ""
+    var browserCookiesPreviewError: String = ""
+    var isFetchingBrowserCookiesPreview = false
+    var browserCookiesCachedAt: Date?
 
     enum YTDLPSetupStatus: Equatable {
         case unknown
@@ -94,6 +105,10 @@ final class DownloadManager {
     }
 
     nonisolated static let ytdlpDownloadURL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+    nonisolated static let diagnosticsLogDefaultsKey = "diagnosticsLog"
+    nonisolated static let lastBrowserCookieReadAtDefaultsKey = "lastBrowserCookieReadAt"
+    nonisolated static let browserCookiesPreviewDefaultsKey = "browserCookiesPreview"
+    nonisolated static let browserCookiesCachedAtDefaultsKey = "browserCookiesCachedAt"
 
     nonisolated static var bundledYTDLPDirectory: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -102,6 +117,10 @@ final class DownloadManager {
 
     nonisolated static var bundledYTDLPPath: String {
         bundledYTDLPDirectory + "/yt-dlp"
+    }
+
+    nonisolated static var browserCookiesCachePath: String {
+        bundledYTDLPDirectory + "/browser-cookies.txt"
     }
 
     init() {
@@ -114,6 +133,18 @@ final class DownloadManager {
         self.cookiesBrowser = BrowserChoice(rawValue: defaults.string(forKey: "cookiesBrowser") ?? "") ?? .chrome
         self.maxConcurrentDownloads = max(1, defaults.integer(forKey: "maxConcurrent") == 0 ? 3 : defaults.integer(forKey: "maxConcurrent"))
         self.selectedQuality = VideoQuality(rawValue: defaults.string(forKey: "quality") ?? "") ?? .best
+        self.diagnosticsLog = defaults.string(forKey: Self.diagnosticsLogDefaultsKey) ?? ""
+        self.browserCookiesPreview = defaults.string(forKey: Self.browserCookiesPreviewDefaultsKey) ?? ""
+        if let timestamp = defaults.object(forKey: Self.lastBrowserCookieReadAtDefaultsKey) as? TimeInterval {
+            self.lastBrowserCookieReadAt = Date(timeIntervalSince1970: timestamp)
+        } else {
+            self.lastBrowserCookieReadAt = nil
+        }
+        if let timestamp = defaults.object(forKey: Self.browserCookiesCachedAtDefaultsKey) as? TimeInterval {
+            self.browserCookiesCachedAt = Date(timeIntervalSince1970: timestamp)
+        } else {
+            self.browserCookiesCachedAt = nil
+        }
 
         // Migrate: if user had a cookiesPath set but no cookieSource, default to .file
         if !cookiesPath.isEmpty && cookieSource == .none {
@@ -138,8 +169,123 @@ final class DownloadManager {
         defaults.set(cookiesBrowser.rawValue, forKey: "cookiesBrowser")
         defaults.set(maxConcurrentDownloads, forKey: "maxConcurrent")
         defaults.set(selectedQuality.rawValue, forKey: "quality")
+        defaults.set(diagnosticsLog, forKey: Self.diagnosticsLogDefaultsKey)
+        defaults.set(lastBrowserCookieReadAt?.timeIntervalSince1970, forKey: Self.lastBrowserCookieReadAtDefaultsKey)
+        defaults.set(browserCookiesPreview, forKey: Self.browserCookiesPreviewDefaultsKey)
+        defaults.set(browserCookiesCachedAt?.timeIntervalSince1970, forKey: Self.browserCookiesCachedAtDefaultsKey)
         ytdlpFound = FileManager.default.isExecutableFile(atPath: ytdlpPath)
         ytdlpSetupStatus = ytdlpFound ? .ready : .unknown
+    }
+
+    func copyDiagnosticsLog() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnosticsLog, forType: .string)
+    }
+
+    func clearDiagnosticsLog() {
+        diagnosticsLog = ""
+        saveSettings()
+    }
+
+    func noteBrowserCookiesRead(at date: Date = Date()) {
+        lastBrowserCookieReadAt = date
+        saveSettings()
+    }
+
+    func copyBrowserCookiesPreview() {
+        guard !browserCookiesPreview.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(browserCookiesPreview, forType: .string)
+    }
+
+    func invalidateBrowserCookiesCache() {
+        browserCookiesPreview = ""
+        browserCookiesPreviewError = ""
+        browserCookiesCachedAt = nil
+        lastBrowserCookieReadAt = nil
+        try? FileManager.default.removeItem(atPath: Self.browserCookiesCachePath)
+        saveSettings()
+    }
+
+    func fetchBrowserCookiesPreview() {
+        if !browserCookiesPreview.isEmpty {
+            browserCookiesPreviewError = ""
+            return
+        }
+
+        guard ytdlpFound else {
+            browserCookiesPreviewError = "yt-dlp is not available."
+            return
+        }
+        guard cookieSource == .browser else {
+            browserCookiesPreviewError = "Cookie Source must be set to From Browser."
+            return
+        }
+
+        isFetchingBrowserCookiesPreview = true
+        browserCookiesPreviewError = ""
+
+        let ytdlpPath = self.ytdlpPath
+        let browser = self.cookiesBrowser
+        let urlHint = downloads.first?.url ?? "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        let cachePath = Self.browserCookiesCachePath
+
+        Task.detached {
+            if let cachedPreview = Self.readBrowserCookiesCacheSync(path: cachePath) {
+                await MainActor.run {
+                    self.browserCookiesPreview = cachedPreview.text
+                    self.browserCookiesCachedAt = cachedPreview.cachedAt
+                    self.browserCookiesPreviewError = ""
+                    self.isFetchingBrowserCookiesPreview = false
+                    self.saveSettings()
+                }
+                return
+            }
+
+            let result = Self.exportBrowserCookiesSync(
+                ytdlpPath: ytdlpPath,
+                browser: browser,
+                outputPath: cachePath,
+                urlHint: urlHint
+            )
+
+            await MainActor.run {
+                if let cookieText = result.cookieText {
+                    self.browserCookiesPreview = cookieText
+                    self.browserCookiesCachedAt = Date()
+                    self.browserCookiesPreviewError = ""
+                    self.noteBrowserCookiesRead()
+                } else {
+                    self.browserCookiesPreview = ""
+                    self.browserCookiesCachedAt = nil
+                    self.browserCookiesPreviewError = result.errorMessage ?? "Failed to export browser cookies."
+                }
+                self.isFetchingBrowserCookiesPreview = false
+                self.saveSettings()
+            }
+        }
+    }
+
+    func appendDiagnosticsEntry(
+        title: String,
+        url: String,
+        message: String,
+        rawError: String = "",
+        cookieSource: CookieSource,
+        cookieBrowser: BrowserChoice,
+        cookieFile: String
+    ) {
+        let entry = Self.makeDiagnosticsEntry(
+            title: title,
+            url: url,
+            message: message,
+            rawError: rawError,
+            cookieSource: cookieSource,
+            cookieBrowser: cookieBrowser,
+            cookieFile: cookieFile
+        )
+        diagnosticsLog = diagnosticsLog.isEmpty ? entry : "\(entry)\n\n\(diagnosticsLog)"
+        saveSettings()
     }
 
     /// Builds cookie arguments based on user's chosen cookie source.
@@ -403,14 +549,52 @@ final class DownloadManager {
         let outputFmt = item.quality.outputFormat
         let isAudioOnly = item.quality == .audioOnly
 
+        if cookieSrc == .browser {
+            noteBrowserCookiesRead()
+        }
+
         let workerTask = Task.detached {
+            var resolvedCookieSource = cookieSrc
+            var resolvedCookieFile = cookieFile
+
+            if cookieSrc == .browser {
+                if FileManager.default.fileExists(atPath: Self.browserCookiesCachePath) {
+                    resolvedCookieSource = .file
+                    resolvedCookieFile = Self.browserCookiesCachePath
+                } else {
+                    let cookieExport = Self.exportBrowserCookiesSync(
+                        ytdlpPath: ytdlp,
+                        browser: cookieBrowser,
+                        outputPath: Self.browserCookiesCachePath,
+                        urlHint: url
+                    )
+
+                    await MainActor.run {
+                        if let cookieText = cookieExport.cookieText {
+                            self.browserCookiesPreview = cookieText
+                            self.browserCookiesCachedAt = Date()
+                            self.browserCookiesPreviewError = ""
+                            self.noteBrowserCookiesRead()
+                        } else if let errorMessage = cookieExport.errorMessage {
+                            self.browserCookiesPreviewError = errorMessage
+                        }
+                        self.saveSettings()
+                    }
+
+                    if cookieExport.cookieText != nil {
+                        resolvedCookieSource = .file
+                        resolvedCookieFile = Self.browserCookiesCachePath
+                    }
+                }
+            }
+
             let metadata = Self.fetchMetadataSync(
                 url: url,
                 ytdlpPath: ytdlp,
                 formatString: formatStr,
-                cookieSource: cookieSrc,
+                cookieSource: resolvedCookieSource,
                 cookieBrowser: cookieBrowser,
-                cookieFile: cookieFile
+                cookieFile: resolvedCookieFile
             )
             let isStillCurrent = await MainActor.run {
                 item.activityToken == activityToken
@@ -433,13 +617,13 @@ final class DownloadManager {
             process.executableURL = URL(fileURLWithPath: ytdlp)
             process.environment = Self.shellEnvironment()
 
-            var args: [String] = Self.cookieArgs(source: cookieSrc, browser: cookieBrowser, filePath: cookieFile)
+            var args: [String] = Self.cookieArgs(source: resolvedCookieSource, browser: cookieBrowser, filePath: resolvedCookieFile)
             args += [
                 "-f", formatStr,
                 "--newline",
                 "--no-colors",
                 "--no-overwrites",
-                "-o", "\(dest)/%(title)s.%(ext)s",
+                "-o", "\(dest)/%(title)s_%(timestamp>%Y%m%d_%H%M%S)s.%(ext)s",
             ]
             if !isAudioOnly {
                 args += ["--merge-output-format", outputFmt]
@@ -460,7 +644,16 @@ final class DownloadManager {
             } catch {
                 await MainActor.run {
                     guard item.activityToken == activityToken else { return }
-                    item.status = .failed("Cannot start yt-dlp: \(error.localizedDescription)")
+                    let message = "Cannot start yt-dlp: \(error.localizedDescription)"
+                    item.status = .failed(message)
+                    self.appendDiagnosticsEntry(
+                        title: item.title,
+                        url: item.url,
+                        message: message,
+                        cookieSource: resolvedCookieSource,
+                        cookieBrowser: cookieBrowser,
+                        cookieFile: resolvedCookieFile
+                    )
                     item.process = nil
                     item.workerTask = nil
                     self.startNextDownloads()
@@ -529,9 +722,9 @@ final class DownloadManager {
             }
 
             let exitCode = process.terminationStatus
+            let errData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errStr = String(data: errData, encoding: .utf8) ?? ""
             if exitCode != 0 {
-                let errData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let errStr = String(data: errData, encoding: .utf8) ?? ""
                 state.errorMessage = errStr
                     .components(separatedBy: .newlines)
                     .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
@@ -558,10 +751,37 @@ final class DownloadManager {
                     }
                     self.sendNotification(title: "Download Complete", body: item.title)
                 } else if item.status != .cancelled {
-                    item.status = .failed(finalError ?? "yt-dlp exited with code \(exitCode)")
+                    let message = finalError ?? "yt-dlp exited with code \(exitCode)"
+                    item.status = .failed(message)
+                    self.appendDiagnosticsEntry(
+                        title: item.title,
+                        url: item.url,
+                        message: message,
+                        rawError: errStr,
+                        cookieSource: resolvedCookieSource,
+                        cookieBrowser: cookieBrowser,
+                        cookieFile: resolvedCookieFile
+                    )
+                    if cookieSrc == .browser {
+                        let cookieExport = Self.exportBrowserCookiesSync(
+                            ytdlpPath: ytdlp,
+                            browser: cookieBrowser,
+                            outputPath: Self.browserCookiesCachePath,
+                            urlHint: url
+                        )
+                        if let cookieText = cookieExport.cookieText {
+                            self.browserCookiesPreview = cookieText
+                            self.browserCookiesCachedAt = Date()
+                            self.browserCookiesPreviewError = ""
+                            self.noteBrowserCookiesRead()
+                        } else if let errorMessage = cookieExport.errorMessage {
+                            self.browserCookiesPreviewError = errorMessage
+                        }
+                    }
                 }
                 item.process = nil
                 item.workerTask = nil
+                self.saveSettings()
                 self.startNextDownloads()
             }
         }
@@ -707,6 +927,138 @@ final class DownloadManager {
         }
 
         return formattedByteCount(fileSize.stringValue)
+    }
+
+    nonisolated static func exportBrowserCookiesSync(
+        ytdlpPath: String,
+        browser: BrowserChoice,
+        outputPath: String,
+        urlHint: String
+    ) -> BrowserCookieExportResult {
+        let parentDirectory = URL(fileURLWithPath: outputPath).deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+
+        let process = Process()
+        let errorPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: ytdlpPath)
+        process.arguments = [
+            "--cookies-from-browser", browser.rawValue,
+            "--cookies", outputPath,
+            "--skip-download",
+            urlHint,
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = errorPipe
+        process.environment = shellEnvironment()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8) ?? ""
+
+            if process.terminationStatus == 0,
+               let cookieData = try? Data(contentsOf: URL(fileURLWithPath: outputPath)),
+               let cookieText = String(data: cookieData, encoding: .utf8),
+               !cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                return BrowserCookieExportResult(cookieText: cookieText, errorMessage: nil)
+            }
+
+            let message = errorText
+                .components(separatedBy: .newlines)
+                .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+                ?? "Failed to export browser cookies."
+            return BrowserCookieExportResult(cookieText: nil, errorMessage: message)
+        } catch {
+            return BrowserCookieExportResult(cookieText: nil, errorMessage: error.localizedDescription)
+        }
+    }
+
+    nonisolated static func readBrowserCookiesCacheSync(path: String) -> (text: String, cachedAt: Date?)? {
+        guard FileManager.default.fileExists(atPath: path),
+              let cookieData = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let cookieText = String(data: cookieData, encoding: .utf8)
+        else {
+            return nil
+        }
+
+        let trimmed = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let cachedAt: Date?
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+           let modified = attrs[.modificationDate] as? Date
+        {
+            cachedAt = modified
+        } else {
+            cachedAt = nil
+        }
+
+        return (cookieText, cachedAt)
+    }
+
+    nonisolated static func makeDiagnosticsEntry(
+        title: String,
+        url: String,
+        message: String,
+        rawError: String = "",
+        cookieSource: CookieSource,
+        cookieBrowser: BrowserChoice,
+        cookieFile: String,
+        timestamp: Date = Date()
+    ) -> String {
+        var lines = [
+            "[\(timestamp.formatted(date: .numeric, time: .standard))] \(title)",
+            "URL: \(url)",
+            "Error: \(message)",
+            "Cookies: \(cookieDescription(source: cookieSource, browser: cookieBrowser, filePath: cookieFile))",
+        ]
+
+        if let hint = failureHint(message: message, cookieSource: cookieSource) {
+            lines.append("Hint: \(hint)")
+        }
+
+        let trimmedError = rawError.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedError.isEmpty {
+            lines.append("Raw yt-dlp output:")
+            lines.append(trimmedError)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    nonisolated static func cookieDescription(source: CookieSource, browser: BrowserChoice, filePath: String) -> String {
+        switch source {
+        case .none:
+            return "None"
+        case .browser:
+            return "From Browser (\(browser.displayName), fetched fresh on each download)"
+        case .file:
+            let filename = filePath.isEmpty ? "No file selected" : URL(fileURLWithPath: filePath).lastPathComponent
+            return "From File (\(filename))"
+        }
+    }
+
+    nonisolated static func failureHint(message: String, cookieSource: CookieSource) -> String? {
+        let lowered = message.lowercased()
+        if lowered.contains("403") || lowered.contains("forbidden") {
+            switch cookieSource {
+            case .browser:
+                return "This often means the browser session is no longer logged in or YouTube blocked the current request. Close and reopen the browser, confirm you can play the video there, then retry."
+            case .file:
+                return "This often means the exported cookies file is stale. Re-export cookies.txt and select it again in Settings before retrying."
+            case .none:
+                return "This often needs cookies. Switch Cookie Source to From Browser in Settings and retry."
+            }
+        }
+
+        if lowered.contains("sign in") || lowered.contains("age-restricted") || lowered.contains("private") {
+            return "This video likely needs an authenticated session. Using From Browser is the most reliable option."
+        }
+
+        return nil
     }
 
     // MARK: - Notifications
