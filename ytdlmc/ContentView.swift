@@ -39,17 +39,19 @@ struct ContentView: View {
     // MARK: - Input Area
 
     private var inputArea: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "link")
                     .foregroundStyle(.secondary)
+                    .padding(.top, 2)
 
-                TextField("Paste YouTube URL here…", text: $urlText)
+                TextField("Paste YouTube URLs here — one per line…", text: $urlText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.body)
-                    .onSubmit { startDownload() }
+                    .lineLimit(1...6)
 
                 pasteButton
+                    .padding(.top, 2)
 
                 qualityPicker
 
@@ -59,8 +61,38 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(.fill.quaternary)
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            hintRow
         }
         .padding(16)
+    }
+
+    private var hintRow: some View {
+        HStack(spacing: 4) {
+            if urlCount > 1 {
+                Image(systemName: "list.bullet")
+                    .font(.caption2)
+                Text("\(urlCount) links ready")
+                    .font(.caption)
+            } else {
+                Text("Tip: add several links, one per line")
+                    .font(.caption)
+            }
+
+            Spacer()
+
+            Text("⌘↩ to download")
+                .font(.caption)
+        }
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 4)
+    }
+
+    private var urlCount: Int {
+        urlText
+            .components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .count
     }
 
     private var pasteButton: some View {
@@ -241,7 +273,7 @@ struct ContentView: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
 
-                Text("Paste a YouTube URL above or drag & drop a link")
+                Text("Paste YouTube URLs above — one per line — or drag & drop links")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
             }
@@ -259,7 +291,7 @@ struct ContentView: View {
                 Image(systemName: "arrow.down.doc.fill")
                     .font(.system(size: 40))
                     .foregroundStyle(.blue)
-                Text("Drop YouTube URL")
+                Text("Drop YouTube URLs")
                     .font(.headline)
                     .foregroundStyle(.blue)
             }
@@ -286,10 +318,21 @@ struct ContentView: View {
 
     private func pasteFromClipboard() {
         guard let content = NSPasteboard.general.string(forType: .string) else { return }
-        if let extracted = DownloadManager.extractYouTubeURL(from: content) {
-            urlText = extracted
+        let found = DownloadManager.extractYouTubeURLs(from: content)
+        let textToAdd = found.isEmpty
+            ? content.trimmingCharacters(in: .whitespacesAndNewlines)
+            : found.joined(separator: "\n")
+        appendURLText(textToAdd)
+    }
+
+    /// Appends URL text on its own line, preserving anything already typed.
+    private func appendURLText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            urlText = trimmed
         } else {
-            urlText = content
+            urlText += "\n" + trimmed
         }
     }
 
@@ -313,7 +356,7 @@ struct ContentView: View {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     guard let url else { return }
                     Task { @MainActor in
-                        urlText = url.absoluteString
+                        appendURLText(url.absoluteString)
                     }
                 }
                 return true
@@ -322,11 +365,8 @@ struct ContentView: View {
                 _ = provider.loadObject(ofClass: String.self) { text, _ in
                     guard let text else { return }
                     Task { @MainActor in
-                        if let extracted = DownloadManager.extractYouTubeURL(from: text) {
-                            urlText = extracted
-                        } else {
-                            urlText = text
-                        }
+                        let found = DownloadManager.extractYouTubeURLs(from: text)
+                        appendURLText(found.isEmpty ? text : found.joined(separator: "\n"))
                     }
                 }
                 return true

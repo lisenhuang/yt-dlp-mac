@@ -1093,12 +1093,17 @@ final class DownloadManager {
     }
 
     nonisolated static func extractYouTubeURL(from text: String) -> String? {
+        extractYouTubeURLs(from: text).first
+    }
+
+    /// Returns every YouTube URL found in the text, in order of appearance.
+    nonisolated static func extractYouTubeURLs(from text: String) -> [String] {
         let pattern = #"https?://(?:www\.)?(?:youtube\.com/(?:watch\?[^\s]+|shorts/[^\s]+|live/[^\s]+|playlist\?[^\s]+)|youtu\.be/[^\s]+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range, in: text)
-        else { return nil }
-        return String(text[range])
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            Range(match.range, in: text).map { String(text[$0]) }
+        }
     }
 }
 
