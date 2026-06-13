@@ -98,6 +98,24 @@ Some videos require authentication. To use cookies:
 2. Select **From Browser** and pick your browser (Chrome, Safari, Firefox, etc.)
 3. yt-dlp reads cookies directly — no extensions or manual export needed
 
+#### 🔓 Full Disk Access (required for Safari)
+
+Safari stores its cookies in a macOS-protected location, so the app needs **Full Disk Access** to read them. If a download fails with an error like:
+
+```
+ERROR: [Errno 1] Operation not permitted: '…/Cookies.binarycookies'
+```
+
+then grant access:
+
+1. Open **System Settings → Privacy & Security → Full Disk Access** (the app's *Open Full Disk Access Settings* button takes you straight there)
+2. Click **+**, add **yt-dlp-mac.app** from your Applications folder, and turn its switch **on**
+3. **Fully quit and reopen** yt-dlp-mac — macOS only applies the new permission to a freshly launched app
+
+> **Note:** Adding the *yt-dlp binary* to Full Disk Access does **not** work. macOS attributes file access to the app that launches yt-dlp (this app), so the permission must be granted to **yt-dlp-mac.app** itself.
+>
+> Prefer not to grant Full Disk Access? Use **From File** instead — export a `cookies.txt` with a browser extension and select it in Settings.
+
 ## 🛠️ Building from Source
 
 ```bash

@@ -249,7 +249,8 @@ struct ContentView: View {
                         onRemove: { withAnimation { manager.removeDownload(item) } },
                         onOpen: { manager.openFile(item) },
                         onReveal: { manager.revealInFinder(item) },
-                        onShare: { manager.shareFile(item) }
+                        onShare: { manager.shareFile(item) },
+                        onGrantAccess: { manager.openFullDiskAccessSettings() }
                     )
                     .transition(.asymmetric(
                         insertion: .move(edge: .top).combined(with: .opacity),

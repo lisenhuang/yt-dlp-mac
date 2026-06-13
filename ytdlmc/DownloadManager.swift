@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SwiftUI
 import UserNotifications
@@ -75,6 +76,14 @@ enum BrowserChoice: String, CaseIterable, Identifiable {
         case .chromium: "globe"
         }
     }
+}
+
+/// Whether this app process can read the OS-protected browser cookie store.
+/// `.denied` almost always means the app is missing Full Disk Access.
+enum FullDiskAccessStatus: Equatable {
+    case granted
+    case denied
+    case unknown
 }
 
 @Observable
@@ -301,6 +310,74 @@ final class DownloadManager {
             }
             return []
         }
+    }
+
+    // MARK: - Full Disk Access
+
+    /// Safari's cookie store lives in OS-protected locations that require Full Disk Access.
+    nonisolated static var safariCookiePaths: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path()
+        return [
+            "\(home)/Library/Cookies/Cookies.binarycookies",
+            "\(home)/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+        ]
+    }
+
+    /// Probes whether this app process can actually read Safari's cookie store.
+    ///
+    /// When yt-dlp is launched by this app, macOS evaluates Full Disk Access against the
+    /// responsible process — this app — so a child yt-dlp benefits from the app's grant
+    /// (the same reason `yt-dlp --cookies-from-browser safari` works from a Terminal that
+    /// already has Full Disk Access). This probe therefore reflects what that command will
+    /// be able to do. A `.denied` result means the app itself needs Full Disk Access;
+    /// granting it to the yt-dlp binary alone has no effect, because the app is the
+    /// responsible process macOS checks.
+    nonisolated static func safariCookieAccess() -> FullDiskAccessStatus {
+        var sawProtectedFile = false
+        for path in safariCookiePaths {
+            let fd = open(path, O_RDONLY)
+            if fd >= 0 {
+                close(fd)
+                return .granted
+            }
+            // EPERM / EACCES → the file is there but TCC blocked the read.
+            // ENOENT → the file simply doesn't exist on this machine.
+            if errno != ENOENT {
+                sawProtectedFile = true
+            }
+        }
+        return sawProtectedFile ? .denied : .unknown
+    }
+
+    /// Opens System Settings → Privacy & Security → Full Disk Access, falling back to the
+    /// general Privacy & Security pane if the deep-linked anchor isn't accepted.
+    func openFullDiskAccessSettings() {
+        let fullDiskAccessPane = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        let privacyPane = "x-apple.systempreferences:com.apple.preference.security"
+        if let url = URL(string: fullDiskAccessPane), NSWorkspace.shared.open(url) {
+            return
+        }
+        if let fallback = URL(string: privacyPane) {
+            NSWorkspace.shared.open(fallback)
+        }
+    }
+
+    /// Recognizes the macOS Full Disk Access failure that blocks reading Safari's cookie
+    /// store, e.g. `ERROR: [Errno 1] Operation not permitted: '…/Cookies.binarycookies'`.
+    ///
+    /// Deliberately scoped to Safari's protected cookie file: Chrome/Firefox keep cookies in
+    /// `~/Library/Application Support`, which doesn't require Full Disk Access, so their
+    /// permission or keychain errors must not be misreported as an FDA problem.
+    nonisolated static func isCookiePermissionError(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        let isPermissionDenied = lowered.contains("operation not permitted")
+            || lowered.contains("errno 1")      // EPERM
+            || lowered.contains("errno 13")     // EACCES
+            || lowered.contains("permission denied")
+        let mentionsSafariCookieStore = lowered.contains("binarycookies")
+            || lowered.contains("library/cookies")
+            || (lowered.contains("safari") && lowered.contains("cookie"))
+        return isPermissionDenied && mentionsSafariCookieStore
     }
 
     // MARK: - yt-dlp Discovery & Auto-Install
@@ -1043,6 +1120,11 @@ final class DownloadManager {
 
     nonisolated static func failureHint(message: String, cookieSource: CookieSource) -> String? {
         let lowered = message.lowercased()
+
+        if isCookiePermissionError(message) {
+            return "macOS blocked this app from reading the browser's cookies. Open System Settings → Privacy & Security → Full Disk Access, add and enable \"yt-dlp-mac\", then FULLY QUIT (⌘Q) and reopen the app — the permission only applies to a freshly launched app. Granting access to the yt-dlp binary alone does not work: macOS checks the app that launches yt-dlp, so the app itself needs the permission. Safari in particular keeps its cookies in a protected location, so Full Disk Access is required."
+        }
+
         if lowered.contains("403") || lowered.contains("forbidden") {
             switch cookieSource {
             case .browser:

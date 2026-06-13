@@ -8,6 +8,7 @@ struct DownloadRowView: View {
     let onOpen: () -> Void
     let onReveal: () -> Void
     let onShare: () -> Void
+    let onGrantAccess: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -252,11 +253,19 @@ struct DownloadRowView: View {
     }
 
     private func failedView(message: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isPermissionError = DownloadManager.isCookiePermissionError(message)
+        return VStack(alignment: .leading, spacing: 6) {
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.red)
                 .lineLimit(2)
+
+            if isPermissionError {
+                Text("Grant Full Disk Access to yt-dlp-mac, then fully quit (⌘Q) and reopen the app. (Adding the yt-dlp binary alone won't work.)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(spacing: 12) {
                 Button(action: onRetry) {
@@ -265,6 +274,15 @@ struct DownloadRowView: View {
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.blue)
+
+                if isPermissionError {
+                    Button(action: onGrantAccess) {
+                        Label("Open Full Disk Access", systemImage: "lock.open")
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                }
 
                 Button(action: onRemove) {
                     Label("Remove", systemImage: "trash")

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showCookiePreviewSheet = false
     @State private var didCopyCookieContent = false
+    @State private var fdaStatus: FullDiskAccessStatus = .unknown
 
     var body: some View {
         @Bindable var manager = manager
@@ -140,6 +141,10 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if manager.cookiesBrowser == .safari {
+                        fullDiskAccessNote
+                    }
+
                     if let cachedAt = manager.browserCookiesCachedAt {
                         Text("Last cookie cached: \(cachedAt.formatted(date: .abbreviated, time: .standard))")
                             .font(.caption)
@@ -232,6 +237,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showCookiePreviewSheet) {
             cookiePreviewSheet
         }
+        .onAppear { fdaStatus = DownloadManager.safariCookieAccess() }
         .onChange(of: manager.downloadPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.ytdlpPath) { _, _ in manager.saveSettings() }
         .onChange(of: manager.cookiesPath) { _, _ in manager.saveSettings() }
@@ -242,13 +248,48 @@ struct SettingsView: View {
                 manager.saveSettings()
             }
         }
-        .onChange(of: manager.cookiesBrowser) { _, _ in manager.invalidateBrowserCookiesCache() }
+        .onChange(of: manager.cookiesBrowser) { _, _ in
+            manager.invalidateBrowserCookiesCache()
+            fdaStatus = DownloadManager.safariCookieAccess()
+        }
         .onChange(of: manager.maxConcurrentDownloads) { _, _ in manager.saveSettings() }
         .onChange(of: manager.selectedQuality) { _, _ in manager.saveSettings() }
         .onChange(of: manager.browserCookiesPreview) { _, newValue in
             if !newValue.isEmpty {
                 showCookiePreviewSheet = true
             }
+        }
+    }
+
+    @ViewBuilder
+    private var fullDiskAccessNote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch fdaStatus {
+            case .denied:
+                Label("This app can't read Safari's cookies yet — it needs Full Disk Access.", systemImage: "exclamationmark.shield.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            case .granted:
+                Label("Full Disk Access looks good — the app can read Safari's cookies.", systemImage: "checkmark.shield.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            case .unknown:
+                Label("Safari cookies require Full Disk Access for this app.", systemImage: "shield.lefthalf.filled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("After enabling it, fully quit (⌘Q) and reopen yt-dlp-mac for the change to take effect. Granting access to the yt-dlp binary alone won't work — macOS checks the app that launches yt-dlp, so the app itself needs the permission.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                manager.openFullDiskAccessSettings()
+            } label: {
+                Label("Open Full Disk Access Settings", systemImage: "lock.open")
+            }
+            .font(.caption)
         }
     }
 
