@@ -20,3 +20,10 @@ Guidance for Claude Code when working in this repository.
 If a change does not warrant a user-facing changelog line (e.g. pure refactor
 with no behavior change), still note it under `Changed` so the history stays
 complete.
+
+## Git commit rule (required)
+
+**Never run `git commit` automatically.** Make and stage changes, but leave
+committing to the user unless they explicitly ask you to commit. The same applies
+to `git push` and to creating pull requests — only do these when the user
+directly requests it.
