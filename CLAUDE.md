@@ -21,6 +21,23 @@ If a change does not warrant a user-facing changelog line (e.g. pure refactor
 with no behavior change), still note it under `Changed` so the history stays
 complete.
 
+## Version bump & build rule (required)
+
+**Every time you modify code, bump the app version and build the project in the
+same change.**
+
+- Bump `MARKETING_VERSION` in [ytdlmc.xcodeproj/project.pbxproj](ytdlmc.xcodeproj/project.pbxproj)
+  for every code change: increment the patch component for fixes/small changes
+  (e.g. `1.1` → `1.1.1`) and the minor component for new features (e.g. `1.1` →
+  `1.2`). Also increment `CURRENT_PROJECT_VERSION` (the build number) by one.
+  Apply the bump to all targets so the values stay consistent.
+- After bumping, build the project to confirm it compiles before handing back:
+  `xcodebuild -project ytdlmc.xcodeproj -scheme ytdlmc -configuration Debug build`.
+- The app version is shown in **Settings → About** (read from
+  `CFBundleShortVersionString` / `CFBundleVersion`), so the bumped value is
+  visible to users — keep that display working.
+- Documentation-only or non-code changes do **not** require a version bump.
+
 ## Git commit rule (required)
 
 **Never run `git commit` automatically.** Make and stage changes, but leave

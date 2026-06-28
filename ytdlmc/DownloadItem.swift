@@ -27,15 +27,19 @@ enum VideoQuality: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     var formatString: String {
+        // Prefer QuickTime-friendly H.264 (avc1) video + AAC (m4a) audio, but
+        // always fall back to *any* bestvideo+bestaudio pair before dropping to a
+        // single muxed stream, so videos that only offer AV1/VP9/Opus still
+        // download at full quality instead of failing or grabbing a ≤720p mux.
         switch self {
         case .best:
-            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
         case .hd1080:
-            "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best"
+            "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
         case .hd720:
-            "bestvideo[height<=720][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best"
+            "bestvideo[height<=720][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best"
         case .sd480:
-            "bestvideo[height<=480][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best"
+            "bestvideo[height<=480][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best"
         case .audioOnly:
             "bestaudio[ext=m4a]/bestaudio"
         }
@@ -90,8 +94,26 @@ final class ProcessOutputState: @unchecked Sendable {
     nonisolated(unsafe) private var _buffer = ""
     nonisolated(unsafe) private var _lastFilePath: String?
     nonisolated(unsafe) private var _errorMessage: String?
+    nonisolated(unsafe) private var _lastEmitTime: Date = .distantPast
 
     nonisolated init() {}
+
+    /// Coalesces the flood of `[download] N%` lines yt-dlp emits (often dozens
+    /// per second per download) using a time-based gate: at most ~4 updates per
+    /// second per download. This keeps the UI responsive with several concurrent
+    /// downloads while still refreshing speed/ETA/fileSize promptly — even when
+    /// the percentage barely moves (a stalled or very slow download). Completion
+    /// (`>= 1.0`) always emits.
+    nonisolated func shouldEmitProgress(_ progress: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date()
+        if progress >= 1.0 || now.timeIntervalSince(_lastEmitTime) >= 0.25 {
+            _lastEmitTime = now
+            return true
+        }
+        return false
+    }
 
     nonisolated func appendToBuffer(_ string: String) -> [String] {
         lock.lock()

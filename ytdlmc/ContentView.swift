@@ -31,8 +31,7 @@ struct ContentView: View {
                 .environment(manager)
         }
         .onAppear {
-            manager.ensureYTDLPAvailable()
-            manager.fetchYTDLPVersion()
+            manager.autoUpdateYTDLPIfNeeded()
         }
     }
 
