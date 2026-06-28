@@ -40,7 +40,14 @@ same change.**
 
 ## Git commit rule (required)
 
-**Never run `git commit` automatically.** Make and stage changes, but leave
-committing to the user unless they explicitly ask you to commit. The same applies
-to `git push` and to creating pull requests — only do these when the user
-directly requests it.
+**Committing is a human's job — never `git commit` automatically.** Make and
+stage changes, but leave committing to the user unless they explicitly ask you to
+commit. The same applies to `git push` and to creating pull requests — only do
+these when the user directly requests it.
+
+This rule binds **every** automated actor, including subagents, background
+workflows, and review/verification agents: they must not run `git commit`,
+`git add`, `git push`, or any other command that changes history or the remote.
+When delegating to such agents, tell them explicitly to treat the repository as
+read-only for git state, and afterwards check `git status` / `git log` to confirm
+no stray commit was created.
