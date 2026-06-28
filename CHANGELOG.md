@@ -10,6 +10,12 @@ GitHub Actions [Build & Release](.github/workflows/build.yml) workflow.
 
 ### Added
 
+- yt-dlp now updates automatically. On every launch the app checks GitHub for a
+  newer yt-dlp release and, if the app-managed binary is out of date, downloads
+  the latest version in the background. A Homebrew/system or custom yt-dlp you
+  pointed the app at is left untouched.
+- Settings now shows the app version (and build number) under a new **About**
+  section.
 - Full Disk Access guidance for Safari cookies. When a download using
   **From Browser → Safari** fails because macOS blocks access to Safari's
   protected cookie store, the failed download row now explains the cause and
@@ -20,11 +26,29 @@ GitHub Actions [Build & Release](.github/workflows/build.yml) workflow.
 
 ### Changed
 
+- **From Browser** cookies are now read directly from the browser on every
+  download (matching `yt-dlp --cookies-from-browser`), instead of reusing a saved
+  cookie snapshot. This keeps the YouTube session fresh and is the main fix for
+  downloads that failed even with a logged-in browser.
+- Quality format selection now falls back to any best video + audio pair before
+  dropping to a single combined stream, so videos that only offer AV1/VP9/Opus
+  still download at full quality instead of failing or grabbing a lower-quality
+  stream.
 - URL handling now supports multiple YouTube URLs at once, with improved
   extraction logic for pasted and dropped text.
 
 ### Fixed
 
+- Downloads that failed with *"Sign in to confirm you're not a bot"* or `403`
+  even though the browser was logged in. The app was reusing a cached cookie
+  snapshot that went stale within hours; it now reads live cookies from the
+  browser for each download.
+- The app no longer freezes after a failed **From Browser** download. A blocking
+  cookie re-export was running on the main (UI) thread; that work has been
+  removed now that cookies are read fresh per download.
+- Smoother UI during downloads: rapid yt-dlp progress output is now coalesced so
+  it no longer floods the main thread, preventing beachballing when several
+  downloads run at once.
 - Safari cookie downloads that failed with
   `Operation not permitted: …/Cookies.binarycookies` now surface a clear,
   actionable explanation — grant Full Disk Access to the app, then fully quit

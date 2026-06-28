@@ -106,6 +106,10 @@ final class DownloadManager {
     var isFetchingBrowserCookiesPreview = false
     var browserCookiesCachedAt: Date?
 
+    /// Guards the once-per-launch yt-dlp update check (`onAppear` can fire more
+    /// than once for the same window).
+    @ObservationIgnored var didCheckForUpdateOnLaunch = false
+
     enum YTDLPSetupStatus: Equatable {
         case unknown
         case downloading
@@ -469,6 +473,61 @@ final class DownloadManager {
         installOrUpdateYTDLP()
     }
 
+    /// Called on launch: installs yt-dlp if missing, otherwise checks GitHub for a
+    /// newer release and updates the app-managed binary automatically. Runs once
+    /// per launch.
+    ///
+    /// Only the app's own bundled binary is auto-updated. A Homebrew/system or
+    /// user-chosen custom binary is left untouched (we just read its version),
+    /// because silently replacing a package-manager install would be wrong — and
+    /// `yt-dlp -U` refuses on those anyway.
+    func autoUpdateYTDLPIfNeeded() {
+        if didCheckForUpdateOnLaunch { return }
+        didCheckForUpdateOnLaunch = true
+
+        guard ytdlpFound else {
+            installOrUpdateYTDLP()
+            return
+        }
+
+        let path = ytdlpPath
+        let isAppManaged = (path == Self.bundledYTDLPPath)
+
+        Task.detached {
+            let installed = Self.getVersionSync(ytdlpPath: path)
+            await MainActor.run { self.ytdlpVersion = installed }
+
+            guard isAppManaged,
+                  let latest = await Self.fetchLatestYTDLPVersion(),
+                  !latest.isEmpty, !installed.isEmpty, latest != installed
+            else { return }
+
+            await MainActor.run { self.installOrUpdateYTDLP() }
+        }
+    }
+
+    /// Fetches the latest stable yt-dlp release tag (e.g. "2026.06.09") from GitHub.
+    /// Returns `nil` on any network/parse error so callers can simply keep the
+    /// currently installed binary.
+    nonisolated static func fetchLatestYTDLPVersion() async -> String? {
+        guard let url = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest") else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("yt-dlp-mac", forHTTPHeaderField: "User-Agent")  // GitHub requires a UA
+        request.timeoutInterval = 15
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = json["tag_name"] as? String
+        else {
+            return nil
+        }
+        return tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func fetchYTDLPVersion() {
         guard ytdlpFound else { return }
         let path = ytdlpPath
@@ -631,47 +690,19 @@ final class DownloadManager {
         }
 
         let workerTask = Task.detached {
-            var resolvedCookieSource = cookieSrc
-            var resolvedCookieFile = cookieFile
-
-            if cookieSrc == .browser {
-                if FileManager.default.fileExists(atPath: Self.browserCookiesCachePath) {
-                    resolvedCookieSource = .file
-                    resolvedCookieFile = Self.browserCookiesCachePath
-                } else {
-                    let cookieExport = Self.exportBrowserCookiesSync(
-                        ytdlpPath: ytdlp,
-                        browser: cookieBrowser,
-                        outputPath: Self.browserCookiesCachePath,
-                        urlHint: url
-                    )
-
-                    await MainActor.run {
-                        if let cookieText = cookieExport.cookieText {
-                            self.browserCookiesPreview = cookieText
-                            self.browserCookiesCachedAt = Date()
-                            self.browserCookiesPreviewError = ""
-                            self.noteBrowserCookiesRead()
-                        } else if let errorMessage = cookieExport.errorMessage {
-                            self.browserCookiesPreviewError = errorMessage
-                        }
-                        self.saveSettings()
-                    }
-
-                    if cookieExport.cookieText != nil {
-                        resolvedCookieSource = .file
-                        resolvedCookieFile = Self.browserCookiesCachePath
-                    }
-                }
-            }
-
+            // Read cookies straight from the browser on every download (exactly
+            // like `yt-dlp --cookies-from-browser …`) so YouTube always sees a
+            // fresh, unexpired session. We deliberately do NOT reuse an exported
+            // snapshot file: a cached cookies.txt goes stale within hours and is
+            // what was causing "Sign in to confirm you're not a bot" / 403
+            // failures even with a logged-in browser.
             let metadata = Self.fetchMetadataSync(
                 url: url,
                 ytdlpPath: ytdlp,
                 formatString: formatStr,
-                cookieSource: resolvedCookieSource,
+                cookieSource: cookieSrc,
                 cookieBrowser: cookieBrowser,
-                cookieFile: resolvedCookieFile
+                cookieFile: cookieFile
             )
             let isStillCurrent = await MainActor.run {
                 item.activityToken == activityToken
@@ -694,7 +725,7 @@ final class DownloadManager {
             process.executableURL = URL(fileURLWithPath: ytdlp)
             process.environment = Self.shellEnvironment()
 
-            var args: [String] = Self.cookieArgs(source: resolvedCookieSource, browser: cookieBrowser, filePath: resolvedCookieFile)
+            var args: [String] = Self.cookieArgs(source: cookieSrc, browser: cookieBrowser, filePath: cookieFile)
             args += [
                 "-f", formatStr,
                 "--newline",
@@ -727,9 +758,9 @@ final class DownloadManager {
                         title: item.title,
                         url: item.url,
                         message: message,
-                        cookieSource: resolvedCookieSource,
+                        cookieSource: cookieSrc,
                         cookieBrowser: cookieBrowser,
-                        cookieFile: resolvedCookieFile
+                        cookieFile: cookieFile
                     )
                     item.process = nil
                     item.workerTask = nil
@@ -761,9 +792,17 @@ final class DownloadManager {
                         state.lastFilePath = path
                     }
 
+                    // Parsing happens on this background reader thread. Only hop to
+                    // the main actor when progress actually moved or a stage/merge
+                    // transition occurred — otherwise the per-line flood of
+                    // @MainActor tasks saturates the UI thread and beachballs.
+                    let hasStageChange = parsed.isMerging || parsed.stage != nil
+                    let emitProgress = parsed.progress.map { state.shouldEmitProgress($0) } ?? false
+                    guard hasStageChange || emitProgress else { continue }
+
                     Task { @MainActor in
                         guard item.activityToken == activityToken else { return }
-                        if let p = parsed.progress {
+                        if emitProgress, let p = parsed.progress {
                             item.progress = p
                         }
                         if let s = parsed.speed { item.speed = s }
@@ -835,26 +874,10 @@ final class DownloadManager {
                         url: item.url,
                         message: message,
                         rawError: errStr,
-                        cookieSource: resolvedCookieSource,
+                        cookieSource: cookieSrc,
                         cookieBrowser: cookieBrowser,
-                        cookieFile: resolvedCookieFile
+                        cookieFile: cookieFile
                     )
-                    if cookieSrc == .browser {
-                        let cookieExport = Self.exportBrowserCookiesSync(
-                            ytdlpPath: ytdlp,
-                            browser: cookieBrowser,
-                            outputPath: Self.browserCookiesCachePath,
-                            urlHint: url
-                        )
-                        if let cookieText = cookieExport.cookieText {
-                            self.browserCookiesPreview = cookieText
-                            self.browserCookiesCachedAt = Date()
-                            self.browserCookiesPreviewError = ""
-                            self.noteBrowserCookiesRead()
-                        } else if let errorMessage = cookieExport.errorMessage {
-                            self.browserCookiesPreviewError = errorMessage
-                        }
-                    }
                 }
                 item.process = nil
                 item.workerTask = nil

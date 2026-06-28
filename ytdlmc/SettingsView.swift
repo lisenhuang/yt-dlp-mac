@@ -133,11 +133,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.menu)
 
-                    Text("yt-dlp will read cookies directly from the selected browser. The browser may ask for permission on first use.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text("The app uses a cached browser-cookie snapshot first, and refreshes that cache only when needed, such as after a failure or when no cache exists yet.")
+                    Text("yt-dlp reads cookies directly from the selected browser on every download, so YouTube always sees a fresh, logged-in session. The browser may ask for permission on first use.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -146,11 +142,7 @@ struct SettingsView: View {
                     }
 
                     if let cachedAt = manager.browserCookiesCachedAt {
-                        Text("Last cookie cached: \(cachedAt.formatted(date: .abbreviated, time: .standard))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Last cookie cached: Never")
+                        Text("Last cookie preview: \(cachedAt.formatted(date: .abbreviated, time: .standard))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -225,6 +217,10 @@ struct SettingsView: View {
                     }
                     .frame(minHeight: 140, maxHeight: 180)
                 }
+            }
+
+            Section("About") {
+                LabeledContent("App Version", value: Self.appVersion)
             }
         }
         .formStyle(.grouped)
@@ -331,6 +327,13 @@ struct SettingsView: View {
         }
         .padding(16)
         .frame(minWidth: 640, minHeight: 420)
+    }
+
+    /// The app's marketing version and build number, e.g. "1.1 (2)".
+    static var appVersion: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(shortVersion) (\(build))"
     }
 
     private func chooseDownloadFolder() {
